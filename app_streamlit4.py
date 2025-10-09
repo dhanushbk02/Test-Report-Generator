@@ -213,7 +213,6 @@ if not models:
     models = ["Model-A  —  25x25", "Model-B  —  50x38"]
     st.warning("No local 'List of models.xlsx' found. Using default model list.")
 
-
 # -------------------------
 # Section 1: Pump Model Selection & Details
 # -------------------------
@@ -236,7 +235,6 @@ def get_field(data, *keys, default=""):
 
 hp = get_field(selected_info, "HP", "Horse Power")
 current = get_field(selected_info, "Current", "Current (A)")
-speed = get_field(selected_info, "Speed", "Speed (RPM)")
 voltage = float(get_field(selected_info, "Voltage", "Volt", default=415))
 frequency = float(get_field(selected_info, "Frequency", "Freq", default=50))
 drawing_no = get_field(
@@ -250,19 +248,41 @@ drawing_no = get_field(
     "Drg No",
     "Drg"
 )
-
 winding_conn = get_field(selected_info, "Winding Connection", "Connection", "Wdg Connection")
 
+# --- Ensure RPM (Speed) is read correctly from List of models Excel ---
+try:
+    # Try exact field names first (case-insensitive)
+    speed_from_info = get_field(
+        selected_info,
+        "Speed",
+        "Speed (RPM)",
+        "RATED SPEED",
+        "SPEED IN RPM",
+        "SPEED RPM",
+        "RPM",
+        default=""
+    )
 
-# Editable input for Voltage & Frequency
-col_v, col_f = st.columns(2)
-with col_v:
-    voltage = st.number_input("Voltage (V)", min_value=0.0, value=float(voltage), step=1.0, key="voltage_input")
-with col_f:
-    frequency = st.number_input("Frequency (Hz)", min_value=0.0, value=float(frequency), step=1.0, key="freq_input")
+    # Fallback: try to find a numeric-looking value that’s within 500–4000 (likely an RPM)
+    if (speed_from_info in ("", None)) and isinstance(selected_info, dict):
+        for k, v in selected_info.items():
+            try:
+                val = float(str(v).replace(",", "").strip())
+                if 500 <= val <= 4000:
+                    speed_from_info = int(round(val))
+                    break
+            except Exception:
+                continue
 
-# Display Model details neatly (2-line layout)
-st.markdown("### Model Details")
+    # Final assignment
+    if speed_from_info not in ("", None, ""):
+        try:
+            speed = int(round(float(speed_from_info)))
+        except Exception:
+            speed = str(speed_from_info)
+except Exception:
+    pass
 
 # Line 1: Model, HP, Current, Speed
 st.markdown(
@@ -273,6 +293,7 @@ st.markdown(
     **Speed:** {speed} RPM  
     """
 )
+
 
 # --- Size (from List of models Excel via selected_info) ---
 pump_size = get_field(
@@ -428,9 +449,9 @@ if input_mode == "Upload & extract":
             st.exception(e)
 
 # =============================
-# 4.0 WINDING RESISTANCE TEST (Refined & Fixed)
+# 4.0 WINDING RESISTANCE TEST (Refined & Polished Layout)
 # =============================
-st.markdown("### 4.0 Winding Resistance Test")
+st.markdown("### 4. Winding Resistance Test")
 
 # --- Get type test resistance & reference temperature from Excel (columns J & K) ---
 type_test_value = get_field(selected_info, "Type Test Resistance", "Type Test Value", "TypeTestRes", default="")
@@ -447,55 +468,73 @@ try:
 except:
     ref_temp_value = 25.0
 
-# --- Display type test reference info ---
-col_left, col_right = st.columns([3, 1])
+# --- Display type test reference info neatly on one line ---
+col_left, col_right = st.columns([3, 1.5])
 with col_left:
     st.markdown(
         f"**Type Test value in Ω** (Reference Temperature: **{ref_temp_value:.1f} °C**)"
     )
 with col_right:
     if type_test_value is not None and type_test_value > 0:
-        st.markdown(f"**Type Test Value:** {type_test_value:.3f} Ω")
+        st.markdown(f"<div style='margin-top:4px;'>**Type Test Value:** {type_test_value:.3f} Ω</div>", unsafe_allow_html=True)
     else:
         # Manual entry if not in Excel
         type_test_value = st.number_input(
             "Enter Type Test Resistance (Ω)",
             min_value=0.0,
-            step=0.001,
+            step=0.1,
             key="manual_type_test_res"
         )
 
 # --- Measured temperature line ---
 st.markdown("_Measured at ambient temperature_")
 
-# Ambient temperature input
-ambient_temp = st.number_input(
-    "Ambient Temperature (°C)",
-    min_value=0,
-    step=1,
-    value=int(ref_temp_value),
-    key="ambient_temp"
-)
+# --- Ambient + Table layout (compact & aligned) ---
+col_temp, col_table = st.columns([0.7, 3.3])
 
-# --- Resistance data entry table ---
-columns = ["UV", "VW", "WU"]
-data = [[0.0, 0.0, 0.0]]
-df_wind = pd.DataFrame(data, columns=columns)
-df_wind = st.data_editor(df_wind, use_container_width=False, key="df_wind")
+with col_temp:
+    ambient_temp = st.number_input(
+        "Ambient Temperature (°C)",
+        min_value=0.0,
+        step=1.0,
+        value=float(ref_temp_value),
+        key="ambient_temp",
+        format="%.0f"
+    )
 
-# --- Compute only if data entered ---
+with col_table:
+    # --- Resistance data entry table (compact, no blank rows) ---
+    columns = ["UV", "VW", "WU"]
+    data = [{"UV": 0.000, "VW": 0.000, "WU": 0.000}]
+    df_wind = pd.DataFrame(data)
+
+    df_wind = st.data_editor(
+        df_wind,
+        hide_index=True,
+        use_container_width=False,
+        width=350,
+        height=95,
+        key="df_wind",
+        num_rows="fixed",
+        column_config={
+            "UV": st.column_config.NumberColumn("UV", step=0.001, format="%.3f", width="small"),
+            "VW": st.column_config.NumberColumn("VW", step=0.001, format="%.3f", width="small"),
+            "WU": st.column_config.NumberColumn("WU", step=0.001, format="%.3f", width="small"),
+        },
+    )
+
+# --- Compute variation and PASS/FAIL logic ---
 if df_wind.values.sum() > 0:
     avg_res = df_wind.mean(axis=1).mean()
-    st.write(f"**Average Resistance:** {avg_res:.2f} Ω")
+    st.write(f"**Average Resistance:** {avg_res:.3f} Ω")
 
-    # Show results only if type test value exists and valid
     if type_test_value and type_test_value > 0:
         variation_res = ((avg_res - type_test_value) / type_test_value) * 100
         col_avg, col_result = st.columns([3, 1])
         with col_avg:
-            st.write(f"**Variation:** {variation_res:.2f}%")
+            st.write(f"**Variation:** {variation_res:+.2f}%")
         with col_result:
-            if abs(variation_res) <= 5:
+            if avg_res <= type_test_value * 1.05:  # within +5%
                 st.success("✅ PASS")
             else:
                 st.error("❌ FAIL")
@@ -509,13 +548,14 @@ st.session_state["wind_df"] = df_wind
 
 
 
+
 # =============================
 # 5.0 INSULATION RESISTANCE TEST (Enhanced)
 # =============================
-st.markdown("### 5.0 Insulation Resistance Test")
+st.markdown("### 5. Insulation Resistance Test")
 st.markdown("_Tested at 500 V DC supply_")
 
-col_ir1, col_ir2 = st.columns([2, 1])
+col_ir1, col_ir2 = st.columns([0.7, 3.3])
 with col_ir1:
     ir_value = st.number_input(
         "Insulation Resistance (MΩ)",
@@ -539,7 +579,7 @@ st.divider()
 # =============================
 # 6.0 HIGH VOLTAGE BREAKDOWN TEST (Dynamic for Model Change)
 # =============================
-st.markdown("### 6.0 High Voltage Breakdown Test")
+st.markdown("### 6. High Voltage Breakdown Test")
 
 # --- Safely extract voltage (L) and leakage current (M) from Excel ---
 hv_test_value = None
@@ -616,7 +656,7 @@ st.divider()
 # ============================= 
 # 7.0 NO-LOAD TEST (fixed session_state key + float dtypes + step)
 # =============================
-st.markdown("### 7.0 No-Load Test")
+st.markdown("### 7. No-Load Test")
 
 no_load_columns = ["Frequency (Hz)", "RPM", "Voltage (V)", "Current (A)", "Input Power (W)"]
 # use floats so data_editor knows these are numeric with decimals
@@ -677,7 +717,7 @@ st.divider()
 # ============================= 
 # 8.0 LOCKED ROTOR TEST
 # =============================
-st.markdown("### 8.0 Locked Rotor Test")
+st.markdown("### 8. Locked Rotor Test")
 
 st.info("Test at lower voltage (typically 100 V).")
 
@@ -921,13 +961,19 @@ else:
 # Input (kW -> W) comparison
 if ref_input_w and float(ref_input_w) != 0.0:
     kw_variation = (meas_input_w - ref_input_w) / ref_input_w * 100.0
-    st.write(f"Input Power Reference: **{ref_input_w:.2f} W** (from {ref_kw_val} kW) — Measured (table): **{meas_input_w:.2f} W** — Variation: **{kw_variation:+.2f}%** (Tol ±{kw_tol_pct}%)")
-    if abs(kw_variation) <= kw_tol_pct:
-        st.success("✅ Input Power PASS")
+    st.write(
+        f"Input Power Reference: **{ref_input_w:.2f} W** (from {ref_kw_val} kW) — "
+        f"Measured (table): **{meas_input_w:.2f} W** — "
+        f"Variation: **{kw_variation:+.2f}%** (Ref. ≤ value considered PASS)"
+    )
+
+    if meas_input_w > ref_input_w:
+        st.error("❌ Input Power FAIL — Measured value exceeds reference.")
     else:
-        st.error("❌ Input Power FAIL")
+        st.success(f"✅ Input Power PASS — Measured value is lower by {abs(kw_variation):.2f}%")
 else:
     st.info("Input Power Reference: **—** (enter reference kW in Section 2)")
+
 
 
 # -------------------------
@@ -1560,4 +1606,5 @@ if st.button("Generate Test Report (.xlsx)"):
         st.error(f"Template not found at {TEMPLATE_PATH}. Please ensure Certificate_Template.xlsx exists.")
     except Exception as e:
         st.error(f"Failed to generate report: {e}")
+
 

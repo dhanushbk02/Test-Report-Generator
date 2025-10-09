@@ -22,17 +22,17 @@ if not hasattr(st, "data_editor"):
 # --- Page setup ---
 st.set_page_config(page_title="Pump Test Results", layout="wide", page_icon="💧")
 # --- Company Header ---
-col_logo, col_title = st.columns([1, 6])
+col_logo, col_title = st.columns([2, 6])
 with col_logo:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Water_drop_icon.svg/768px-Water_drop_icon.svg.png",
-             width=70)
+    st.image("fpl-logo-3-2048x345.png", width=500)
 with col_title:
-    st.markdown("<h1 style='margin-bottom:0px;'>Flow Calculator - By Dhanush (FPL)</h1>", unsafe_allow_html=True)
-    st.caption("Motor & Pump Performance Testing | Flow Oil Pumps Pvt. Ltd.")
+    st.markdown("<h1 style='margin-bottom:0px;'>Test Report Generator</h1>", unsafe_allow_html=True)
+    st.caption("Motor & Pump Performance Testing")
 
 st.markdown("---")
 
-st.title("Flow Oil Pumps Pvt Ltd — Pump Test Results (Excel & PDF Report Generator)")
+
+#st.title("Pump Test Results (Excel & PDF Report Generator)")
 
 # -------------------------
 # Utilities
@@ -191,34 +191,28 @@ def build_pdf_bytes(metadata: dict, wind_df: pd.DataFrame, perf_df: pd.DataFrame
     return BytesIO(data)
 
 # -------------------------
-# Sidebar: Model list upload
+# Model list (auto-load from local Excel)
 # -------------------------
-st.sidebar.header("Model list")
-uploaded_models = st.sidebar.file_uploader("Upload 'List of models' (xlsx/xls/xlsm) (optional)", type=["xlsx","xls","xlsm"])
 models = []
 model_info = {}
-if uploaded_models is not None:
-    try:
-        models, model_info = read_models_from_file(uploaded_models)
-        st.sidebar.success(f"Loaded {len(models)} models from uploaded file")
-    except Exception as e:
-        st.sidebar.error("Failed to parse uploaded models file.")
-        st.sidebar.exception(e)
-else:
-    local_names = ["List of models.xlsx", "List of models.xlsm", "List of models.xls"]
-    for name in local_names:
-        if os.path.exists(name):
-            try:
-                models, model_info = read_models_from_file(name)
-                st.sidebar.success(f"Loaded {len(models)} models from {name}")
-                break
-            except Exception:
-                continue
-    if not models:
-        st.sidebar.info("No models file uploaded or found locally.")
 
+# Try to load models automatically from local Excel file(s)
+local_names = ["List of models.xlsx", "List of models.xlsm", "List of models.xls"]
+for name in local_names:
+    if os.path.exists(name):
+        try:
+            models, model_info = read_models_from_file(name)
+            st.success(f"Loaded {len(models)} models from {name}")
+            break
+        except Exception as e:
+            st.warning(f"⚠️ Failed to read {name}: {e}")
+            continue
+
+# Fallback — if no Excel found
 if not models:
     models = ["Model-A  —  25x25", "Model-B  —  50x38"]
+    st.warning("No local 'List of models.xlsx' found. Using default model list.")
+
 
 # -------------------------
 # Section 1: Pump Model Selection & Details
@@ -280,6 +274,24 @@ st.markdown(
     """
 )
 
+# --- Size (from List of models Excel via selected_info) ---
+pump_size = get_field(
+    selected_info,
+    "Size",
+    "SIZE",
+    "PIPE SIZE",
+    "PIPESIZE",
+    "PIPE_SIZE",
+    "IMPELLER OD",
+    "IMPELLER_OD",
+    default=""
+)
+try:
+    globals()["pump_size"] = pump_size
+except Exception:
+    pass
+st.markdown(f"**Size:** {pump_size} &nbsp;&nbsp;&nbsp;")
+
 # Line 2: Voltage, Frequency, Drawing No., Winding Connection
 st.markdown(
     f"""
@@ -289,6 +301,7 @@ st.markdown(
     **Winding Connection:** {winding_conn}
     """
 )
+
 
 
 # -------------------------
@@ -304,25 +317,31 @@ with c3:
     oa_no = st.text_input("OA. No.")
 
 c4, c5, c6 = st.columns(3)
-with c4:
-    flow_unit = st.selectbox("Flow unit", ["LPM", "m3/hr"], index=0)
-with c5:
-    head_unit = st.selectbox("Head unit", ["m", "bar", "kg/cm2"], index=0)
-with c6:
-    impeller_od = st.number_input("Original impeller OD (mm)", min_value=000,)
 
-st.markdown("**Enter diameters to convert to (comma-separated):**")
-diameters_str = st.text_input("New diameters (mm)", value="000")
-try:
-    diameters = [float(x.strip()) for x in diameters_str.split(",") if x.strip()]
-except Exception:
-    diameters = []
+with c4:
+    # Flow unit selector removed — default value retained for compatibility
+    flow_unit = "LPM"
+    # keep layout spacing consistent
+    st.markdown("")  
+
+with c5:
+    # Head unit selector removed — default value retained for compatibility
+    head_unit = "m"
+    st.markdown("")
+
+with c6:
+    # Original impeller OD input removed — keep variable for compatibility (default 0)
+    impeller_od = 0
+    st.markdown("")
+
+
+
 
 # Flow, Head & Input Power reference inputs (side by side, compact)
 st.markdown("### Flow, Head & Input Power at Duty Point")
 
-# Create 3 equal columns
-col1, col2, col3 = st.columns(3)
+# Create 4 equal columns (added Impeller OD in mm on far right)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     ref_flow = st.number_input(
@@ -356,6 +375,18 @@ with col3:
         key="ref_input_kw",
         label_visibility="visible"
     )
+
+with col4:
+    impeller_od = st.number_input(
+        "Impeller OD in mm",
+        min_value=0.0,
+        value=0.0,
+        step=0.1,             # increments of 0.1
+        format="%.1f",        # 0.1 decimal place
+        key="impeller_od",
+        label_visibility="visible"
+    )
+
 
 
 
@@ -635,9 +666,9 @@ for c in no_load_columns:
 st.session_state["df_no_load_saved"] = edited_no_load.copy()
 
 # If you still need a kW display, compute it separately (read-only)
-st.markdown("**Input Power (kW)** (derived, read-only)")
-input_kw_display = (edited_no_load["Input Power (W)"] / 1000.0).round(2)
-st.dataframe(input_kw_display.to_frame("Input Power (kW)"), use_container_width=True)
+# st.markdown("**Input Power (kW)** (derived, read-only)")
+# input_kw_display = (edited_no_load["Input Power (W)"] / 1000.0).round(2)
+# st.dataframe(input_kw_display.to_frame("Input Power (kW)"), use_container_width=True)
 
 st.divider()
 
@@ -693,7 +724,7 @@ if not df_locked_rotor.empty and df_locked_rotor["Applied Voltage (V)"].iloc[0] 
     else:
         st.error("❌ FAIL — Locked rotor current exceeds 6× rated current.")
 else:
-    st.warning("Enter Applied Voltage and Locked Current to compute results.")
+    st.warning("Enter Data to compute results.")
 
 st.divider()
 
@@ -704,9 +735,7 @@ st.divider()
 st.subheader("9. Test Results Table (compact)")
 st.info(
     "Enter the electrical and hydraulic test readings below. "
-    "Flow and Efficiency are calculated from Differential Pressure (mmHg), Head, Input Power, and the selected orifice constant. "
-    "Press 'Calculate Flow & Efficiency' to update both Flow and Efficiency in the table."
-)
+    )
 
 # -------------------------
 # Pipe size + orifice constant
@@ -1037,63 +1066,498 @@ if show_charts:
 
 
 # -------------------------
-# Section 11: Export (Excel & PDF)
+# Section: Export using Template (single sheet, no charts) - FIXED
 # -------------------------
-st.subheader("11. Export options")
-export_mode = st.selectbox("Excel export mode", ["Single sheet (winding + performance)", "Per-diameter sheets (one sheet per diameter)"])
-per_diameter = export_mode.startswith("Per-diameter")
-round_decimals = st.number_input("Round outputs to how many decimals?", min_value=0, max_value=6, value=3, step=1)
+from openpyxl import load_workbook
+from io import BytesIO
 
-# Ensure wind_df variable exists for export
-wind_df = df_wind  # use the df shown in the widget
+TEMPLATE_PATH = "Certificate_Template.xlsx"  # keep in same folder as app_streamlit.py
 
-# Build metadata safely (ensure ref_flow_val/ref_head_val exist)
-ref_flow_val = st.session_state.get("ref_flow", (ref_flow if 'ref_flow' in globals() else 0.0))
-ref_head_val = st.session_state.get("ref_head", (ref_head if 'ref_head' in globals() else 0.0))
+def _find_cell_with_text(ws, text):
+    """Return (row, col) of the first cell that contains given text (case-insensitive)."""
+    text_low = str(text).strip().lower()
+    for row in ws.iter_rows(values_only=False):
+        for cell in row:
+            if cell.value and isinstance(cell.value, str) and text_low in cell.value.strip().lower():
+                return cell.row, cell.column
+    return None
 
-if st.button("Generate Excel"):
-    metadata = {
-        "Model": selected_model,
-        "Comp No.": comp_no,
-        "Date": test_date.strftime("%Y-%m-%d"),
-        "OA No.": oa_no,
-        "Flow unit (input)": flow_unit,
-        "Head unit (input)": head_unit,
-        "Original impeller OD (mm)": impeller_od,
-        "Ambient Temp (°C)": ambient_temp,
-        "Type Test Resistance (Ω)": type_test_res,
-        "Flow Reference (LPM)": ref_flow_val,
-        "Head Reference (m)": ref_head_val
-    }
-    xlsx_bytes = build_excel_bytes(metadata, wind_df, perf_df, per_diameter, diameters, impeller_od, int(round_decimals))
-    fname = f"PumpTest_{selected_model}_{test_date}.xlsx"
-    st.download_button("Download Excel", data=xlsx_bytes, file_name=fname, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+def _find_header_row(ws, start_row, header_keywords):
+    """Find header row by scanning below the given start_row."""
+    for r in range(start_row, start_row + 6):
+        header_map = {}
+        row_vals = [ws.cell(row=r, column=c).value for c in range(1, ws.max_column + 1)]
+        joined = " | ".join([str(x).lower() if x else "" for x in row_vals])
+        if any(k.lower() in joined for k in header_keywords):
+            for c in range(1, ws.max_column + 1):
+                v = ws.cell(row=r, column=c).value
+                if v and isinstance(v, str) and v.strip():
+                    header_map[v.strip().lower()] = c
+            return r, header_map
+    return None, {}
 
-if st.button("Generate PDF"):
-    metadata = {
-        "Model": selected_model,
-        "Comp No.": comp_no,
-        "Date": test_date.strftime("%Y-%m-%d"),
-        "OA No.": oa_no,
-        "Flow unit (input)": flow_unit,
-        "Head unit (input)": head_unit,
-        "Original impeller OD (mm)": impeller_od,
-        "Ambient Temp (°C)": ambient_temp,
-        "Type Test Resistance (Ω)": type_test_res,
-        "Flow Reference (LPM)": ref_flow_val,
-        "Head Reference (m)": ref_head_val
-    }
-    # use chart_bufs if generated; else create minimal plots
-    if not chart_bufs:
+def _safe_row_get(row, keys, default=0):
+    """Try keys in order and return first non-empty value; else default."""
+    for k in keys:
+        if k in row and row.get(k) not in (None, ""):
+            return row.get(k)
+    return default
+
+def generate_certificate_from_template_bytes(template_path: str,
+                                              metadata: dict,
+                                              perf_df: 'pd.DataFrame',
+                                              decimals: int = 2) -> BytesIO:
+    """Load the Excel template, fill metadata & performance table, return BytesIO."""
+    wb = load_workbook(template_path)
+    ws = wb.active  # assume main certificate sheet
+
+    # === 1) Write header details to specific cells per your mapping ===
+    try:
+        if metadata.get("date", "") != "":
+            ws["F2"].value = metadata.get("date")            # F2: DATE
+        if metadata.get("oa_no", "") != "":
+            ws["F3"].value = metadata.get("oa_no")           # F3: OA. No.
+
+        ws["B2"].value = metadata.get("type", "")           # B2: Pump Type / Model
+        ws["B3"].value = metadata.get("size", "")           # B3: Pump Size
+        ws["B4"].value = metadata.get("volts", "")          # B4: Voltage (if any)
+        ws["B5"].value = metadata.get("rpm", "")            # B5: Speed (RPM)
+
+        # === Duty display (B6 merged cell B6:C6:D6) ===
         try:
-            f1 = plt.figure()
-            plt.scatter(perf_df["Flow (LPM)"], perf_df["Head (m)"])
-            plt.xlabel("Flow (LPM)"); plt.ylabel("Head (m)"); plt.title("Flow vs Head")
-            chart_bufs["Flow_vs_Head"] = fig_to_buf(f1)
-        except Exception:
-            chart_bufs = {}
-    pdf_bytes = build_pdf_bytes(metadata, wind_df, perf_df, chart_bufs, int(round_decimals))
-    pfname = f"PumpTest_{selected_model}_{test_date}.pdf"
-    st.download_button("Download PDF", data=pdf_bytes, file_name=pfname, mime="application/pdf")
+            # Try to get flow & head from several likely places (globals, session_state, perf_df, metadata)
+            flow_val = None
+            head_val = None
+            try:
+                import streamlit as _st
+                if "ref_flow" in _st.session_state:
+                    flow_val = _st.session_state.get("ref_flow")
+                if "ref_head" in _st.session_state:
+                    head_val = _st.session_state.get("ref_head")
+            except Exception:
+                pass
 
-st.info("Notes: Winding resistance and compact performance table are included in exports. Use Section 2 tabs to provide manual Flow & Head reference values for comparison.")
+            # fallback to globals (what your app often uses)
+            if flow_val in (None, "") and "ref_flow" in globals():
+                flow_val = globals().get("ref_flow")
+            if head_val in (None, "") and "ref_head" in globals():
+                head_val = globals().get("ref_head")
+
+            # fallback to perf_df first row (if still missing)
+            try:
+                if (flow_val in (None, "") or head_val in (None, "")) and hasattr(perf_df, "iloc") and len(perf_df) > 0:
+                    first_pf = perf_df.iloc[0]
+                    if flow_val in (None, ""):
+                        flow_val = first_pf.get("Flow (LPM)", first_pf.get("Flow", first_pf.get("LPM", flow_val)))
+                    if head_val in (None, ""):
+                        head_val = first_pf.get("Head (m)", first_pf.get("Head", head_val))
+            except Exception:
+                pass
+
+            # fallback to metadata 'duty'
+            if (flow_val in (None, "")) or (head_val in (None, "")):
+                duty_meta = metadata.get("duty", "")
+                if duty_meta and isinstance(duty_meta, str) and "@" in duty_meta:
+                    ws["B6"].value = duty_meta
+                else:
+                    if flow_val in (None, ""):
+                        flow_val = metadata.get("ref_flow", metadata.get("flow", flow_val))
+                    if head_val in (None, ""):
+                        head_val = metadata.get("ref_head", metadata.get("head", head_val))
+
+            # Write duty string if values found
+            if flow_val not in (None, "") and head_val not in (None, ""):
+                try:
+                    fnum = int(round(float(flow_val)))
+                    hnum = int(round(float(head_val)))
+                    ws["B6"].value = f"{fnum} Lpm @ {hnum} m"
+                    try:
+                        ws.merge_cells("B6:D6")
+                    except Exception:
+                        pass
+                except Exception:
+                    try:
+                        ws["B6"].value = f"{flow_val} Lpm @ {head_val} m"
+                        try: ws.merge_cells("B6:D6")
+                        except: pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Keep A7, C7 & E7 as-is (do not overwrite)
+
+
+        if metadata.get("connection", "") != "":
+            ws["F6"].value = metadata.get("connection")     # F6: Winding connection
+        if metadata.get("drawing_no", "") != "":
+            ws["F7"].value = metadata.get("drawing_no")    # F7: Drawing number
+
+        if metadata.get("comp_no", "") != "":
+            ws["D2"].value = metadata.get("comp_no")        # D2: Component / Serial No
+        if metadata.get("amps", "") != "":
+            val_amps = metadata.get("amps")
+            try:
+                ws["D3"].value = round(float(val_amps), 1)   # D3: Amps (1 decimal)
+            except Exception:
+                ws["D3"].value = val_amps
+        if metadata.get("hp", "") != "":
+            ws["D4"].value = metadata.get("hp")             # D4: HP
+        if metadata.get("hz", "") != "":
+            try:
+                ws["D5"].value = round(float(metadata.get("hz")), 1)
+            except Exception:
+                ws["D5"].value = metadata.get("hz")
+
+    except Exception:
+        pass
+
+    # === 1b) Ambient temp & winding resistances (D10, F10, G10, H10) ===
+    try:
+        if metadata.get("ambient_temp", "") != "":
+            ws["D10"].value = metadata.get("ambient_temp")   # D10: Ambient Temperature (°C)
+        # Winding resistances raw values (no rounding)
+        if metadata.get("res_uv", "") != "":
+            ws["F10"].value = metadata.get("res_uv")        # F10: UV
+        if metadata.get("res_vw", "") != "":
+            ws["G10"].value = metadata.get("res_vw")        # G10: VW
+        if metadata.get("res_wu", "") != "":
+            ws["H10"].value = metadata.get("res_wu")        # H10: WU
+    except Exception:
+        pass
+
+    # === 2) High voltage (C12) ===
+    try:
+        hv = metadata.get("hv_test", "")
+        if hv != "" and hv is not None:
+            try:
+                hv_num = float(hv) * 1000.0  # multiply kV -> V
+                ws["C12"].value = int(round(hv_num))
+            except Exception:
+                try:
+                    ws["C12"].value = int(round(float(hv)))
+                except Exception:
+                    ws["C12"].value = hv
+    except Exception:
+        pass
+
+    # === 3) No-load test row (C14..G14): Freq, Speed, Voltage, Current, Power ===
+    try:
+        nl = metadata.get("no_load", {})  # expect a dict with keys freq,rpm,volt,curr,power
+        if isinstance(nl, dict):
+            if nl.get("freq", "") != "":
+                try: ws["C14"].value = round(float(nl.get("freq")), 1)
+                except: ws["C14"].value = nl.get("freq")
+            if nl.get("rpm", "") != "":
+                try: ws["D14"].value = int(round(float(nl.get("rpm"))))
+                except: ws["D14"].value = nl.get("rpm")
+            if nl.get("volt", "") != "":
+                try: ws["E14"].value = int(round(float(nl.get("volt"))))
+                except: ws["E14"].value = nl.get("volt")
+            if nl.get("curr", "") != "":
+                try: ws["F14"].value = round(float(nl.get("curr")), 1)
+                except: ws["F14"].value = nl.get("curr")
+            if nl.get("power", "") != "":
+                try: ws["G14"].value = int(round(float(nl.get("power"))))
+                except: ws["G14"].value = nl.get("power")
+    except Exception:
+        pass
+
+    # === 4) Locked rotor test (E16,F16,G16) Voltage, Current, Watts ===
+    try:
+        # helper converters
+        def _to_int_safe(v):
+            try:
+                return int(round(float(v)))
+            except Exception:
+                return None
+        def _to_float1_safe(v):
+            try:
+                return round(float(v), 1)
+            except Exception:
+                return None
+
+        # 1) prefer session_state df_locked_rotor
+        lr_candidate = None
+        try:
+            import streamlit as _st
+            if "df_locked_rotor" in _st.session_state:
+                lr_candidate = _st.session_state.get("df_locked_rotor")
+        except Exception:
+            lr_candidate = None
+
+        # 2) fallback to globals
+        if lr_candidate is None and "df_locked_rotor" in globals():
+            lr_candidate = globals().get("df_locked_rotor")
+
+        # 3) fallback to metadata dict
+        if lr_candidate is None:
+            lr_meta = metadata.get("locked_rotor", None)
+            if isinstance(lr_meta, dict) and any(lr_meta.get(k) not in (None, "") for k in ("volt", "curr", "power")):
+                lr_candidate = lr_meta
+
+        # normalize to a first-row mapping
+        first_row = None
+        if lr_candidate is not None:
+            try:
+                # pandas DataFrame / Series
+                if hasattr(lr_candidate, "iloc"):
+                    if len(lr_candidate) > 0:
+                        first_row = lr_candidate.iloc[0]
+                # list-of-dicts
+                elif isinstance(lr_candidate, list) and len(lr_candidate) > 0 and isinstance(lr_candidate[0], dict):
+                    first_row = lr_candidate[0]
+                # dict-like: could be {col: [values]} or {col: scalar}
+                elif isinstance(lr_candidate, dict):
+                    # detect dict-of-lists (columns -> lists)
+                    is_col_lists = False
+                    for vv in lr_candidate.values():
+                        if isinstance(vv, (list, tuple, pd.Series)):
+                            is_col_lists = True
+                            break
+                    if is_col_lists:
+                        # build a first-row dict by taking first element of each column list (if present)
+                        fr = {}
+                        for k, vv in lr_candidate.items():
+                            try:
+                                if isinstance(vv, (list, tuple, pd.Series)) and len(vv) > 0:
+                                    fr[k] = vv[0]
+                                else:
+                                    fr[k] = vv
+                            except Exception:
+                                fr[k] = vv
+                        first_row = fr
+                    else:
+                        # simple dict mapping column -> value (one-row)
+                        first_row = lr_candidate
+            except Exception:
+                first_row = None
+
+        # helper to get from first_row with multiple possible keys
+        def _get_from_first(keys):
+            if first_row is None:
+                return None
+            for k in keys:
+                try:
+                    # dict-like
+                    if isinstance(first_row, dict) and k in first_row:
+                        v = first_row.get(k)
+                        if v not in (None, ""):
+                            return v
+                    else:
+                        # pandas Series or object with .get
+                        try:
+                            v = first_row.get(k)
+                            if v not in (None, ""):
+                                return v
+                        except Exception:
+                            # attribute access or key access fallback
+                            try:
+                                v = getattr(first_row, k)
+                                if v not in (None, ""):
+                                    return v
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+            return None
+
+        # try common names
+        volt_val = _get_from_first(["Applied Voltage (V)", "Applied Voltage", "Voltage (V)", "Voltage", "Volt"])
+        curr_val = _get_from_first(["Locked Current (A)", "Locked Current", "Current (A)", "Current", "Amps"])
+        power_val = _get_from_first(["Input Power (W)", "Input Power", "Power (W)", "Power"])
+
+        # write only when present (do not overwrite if missing)
+        if volt_val not in (None, ""):
+            v_int = _to_int_safe(volt_val)
+            ws["E16"].value = v_int if v_int is not None else volt_val
+        if curr_val not in (None, ""):
+            v_f1 = _to_float1_safe(curr_val)
+            ws["F16"].value = v_f1 if v_f1 is not None else curr_val
+        if power_val not in (None, ""):
+            v_int2 = _to_int_safe(power_val)
+            ws["G16"].value = v_int2 if v_int2 is not None else power_val
+
+    except Exception:
+        # non-fatal — leave template cells unchanged on error
+        pass
+
+
+
+    # === 5) Write performance table if a "Performance Test Results" section exists in template ===
+    try:
+        header_pos = _find_cell_with_text(ws, "performance test results")
+        if header_pos:
+            header_row_candidate, header_map = _find_header_row(
+                ws, header_pos[0] + 1,
+                header_keywords=["voltage", "input", "head", "lpm", "amps", "flow"]
+            )
+            if header_row_candidate:
+                start_row = header_row_candidate + 1
+
+                def _col_lookup(pref_names):
+                    for name in pref_names:
+                        if name.lower() in header_map:
+                            return header_map[name.lower()]
+                    return None
+
+                volt_col = _col_lookup(["voltage (v)", "voltage", "volt", "v"])
+                amps_col = _col_lookup(["amps", "current (a)", "current"])
+                input_col = _col_lookup(["input (w)", "input-w", "input"])
+                head_col = _col_lookup(["head (m)", "head"])
+                lpm_col = _col_lookup(["flow (lpm)", "lpm", "flow"])
+
+                if not header_map:
+                    volt_col, amps_col, input_col, head_col, lpm_col = 1, 2, 3, 4, 5
+
+                for i in range(len(perf_df)):
+                    r = start_row + i
+                    row = perf_df.iloc[i]
+
+                    # Voltage -> Integer
+                    val_volt = _safe_row_get(row, ["Voltage (V)", "Voltage", "Volt"], default=None)
+                    if volt_col and val_volt not in (None, ""):
+                        try:
+                            ws.cell(r, volt_col).value = int(round(float(val_volt)))
+                        except:
+                            ws.cell(r, volt_col).value = val_volt
+
+                    # Current -> 1 decimal
+                    val_curr = _safe_row_get(row, ["Current (A)", "Current", "Amps"], default=None)
+                    if amps_col and val_curr not in (None, ""):
+                        try:
+                            ws.cell(r, amps_col).value = round(float(val_curr), 1)
+                        except:
+                            ws.cell(r, amps_col).value = val_curr
+
+                    # Input -> Integer
+                    val_input = _safe_row_get(row, ["Input (W)", "Input", "Power (W)", "Power"], default=None)
+                    if input_col and val_input not in (None, ""):
+                        try:
+                            ws.cell(r, input_col).value = int(round(float(val_input)))
+                        except:
+                            ws.cell(r, input_col).value = val_input
+
+                    # Head -> Integer
+                    val_head = _safe_row_get(row, ["Head (m)", "Head"], default=None)
+                    if head_col and val_head not in (None, ""):
+                        try:
+                            ws.cell(r, head_col).value = int(round(float(val_head)))
+                        except:
+                            ws.cell(r, head_col).value = val_head
+
+                    # Flow/LPM -> Integer
+                    val_flow = _safe_row_get(row, ["Flow (LPM)", "Flow", "LPM"], default=None)
+                    if lpm_col and val_flow not in (None, ""):
+                        try:
+                            ws.cell(r, lpm_col).value = int(round(float(val_flow)))
+                        except:
+                            ws.cell(r, lpm_col).value = val_flow
+
+                # Write fixed cells C21..C26 and D21..D26 from perf_df if present
+                try:
+                    if "Input (W)" in perf_df.columns and "Head (m)" in perf_df.columns:
+                        for idx in range(6):
+                            target_row = 21 + idx
+                            try:
+                                val_in = perf_df.iloc[idx].get("Input (W)")
+                                if val_in not in (None, ""):
+                                    ws[f"C{target_row}"].value = int(round(float(val_in)))
+                            except Exception:
+                                try:
+                                    ws[f"C{target_row}"].value = perf_df.iloc[idx].get("Input (W)")
+                                except Exception:
+                                    pass
+                            try:
+                                val_h = perf_df.iloc[idx].get("Head (m)")
+                                if val_h not in (None, ""):
+                                    ws[f"D{target_row}"].value = int(round(float(val_h)))
+                            except Exception:
+                                try:
+                                    ws[f"D{target_row}"].value = perf_df.iloc[idx].get("Head (m)")
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # === 6) Save and return BytesIO ===
+    out = BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out
+
+# ---------- Streamlit UI button ----------
+import streamlit as st
+import pandas as pd
+
+st.markdown("---")
+st.subheader("Generate Certificate (from Template)")
+
+# Build metadata_safe (same as before)
+metadata_safe = {
+    "type": selected_model if 'selected_model' in globals() else "",
+    "size": pump_size if 'pump_size' in globals() else "",
+    "volts": voltage if 'voltage' in globals() else "",
+    "rpm": speed if 'speed' in globals() else "",
+    "duty": f"{ref_flow} LPM @ {ref_head} m" if 'ref_flow' in globals() and 'ref_head' in globals() else "",
+    "comp_no": comp_no if 'comp_no' in globals() else "",
+    "oa_no": oa_no if 'oa_no' in globals() else "",
+    "date": test_date.strftime("%Y-%m-%d") if 'test_date' in globals() else "",
+    "amps": current if 'current' in globals() else "",
+    "hp": hp if 'hp' in globals() else "",
+    "hz": frequency if 'frequency' in globals() else "",
+    "connection": winding_conn if 'winding_conn' in globals() else "",
+    "drawing_no": drawing_no if 'drawing_no' in globals() else "",
+    "ambient_temp": ambient_temp if 'ambient_temp' in globals() else "",
+    "res_uv": df_wind["UV"].iloc[0] if 'df_wind' in globals() and "UV" in df_wind.columns and not df_wind.empty else "",
+    "res_vw": df_wind["VW"].iloc[0] if 'df_wind' in globals() and "VW" in df_wind.columns and not df_wind.empty else "",
+    "res_wu": df_wind["WU"].iloc[0] if 'df_wind' in globals() and "WU" in df_wind.columns and not df_wind.empty else "",
+    "hv_test": hv_test_value if 'hv_test_value' in globals() else "",
+    "no_load": {
+        "freq": (st.session_state.get("df_no_load_saved", pd.DataFrame()).get("Frequency (Hz)", [0])[0])
+            if "df_no_load_saved" in st.session_state else "",
+        "rpm": (st.session_state.get("df_no_load_saved", pd.DataFrame()).get("RPM", [0])[0])
+            if "df_no_load_saved" in st.session_state else "",
+        "volt": (st.session_state.get("df_no_load_saved", pd.DataFrame()).get("Voltage (V)", [0])[0])
+            if "df_no_load_saved" in st.session_state else "",
+        "curr": (st.session_state.get("df_no_load_saved", pd.DataFrame()).get("Current (A)", [0])[0])
+            if "df_no_load_saved" in st.session_state else "",
+        "power": (st.session_state.get("df_no_load_saved", pd.DataFrame()).get("Input Power (W)", [0])[0])
+            if "df_no_load_saved" in st.session_state else "",
+    },
+    "locked_rotor": {
+        "volt": (st.session_state.get("df_locked_rotor", pd.DataFrame()).get("Applied Voltage (V)", [0])[0])
+            if "df_locked_rotor" in st.session_state else "",
+        "curr": (st.session_state.get("df_locked_rotor", pd.DataFrame()).get("Locked Current (A)", [0])[0])
+            if "df_locked_rotor" in st.session_state else "",
+        "power": (st.session_state.get("df_locked_rotor", pd.DataFrame()).get("Input Power (W)", [0])[0])
+            if "df_locked_rotor" in st.session_state else "",
+    },
+}
+
+perf_for_export = st.session_state.get("perf_df", perf_df if 'perf_df' in globals() else pd.DataFrame())
+decimals_for_export = int(st.session_state.get("round_decimals", 3))
+
+if st.button("Generate Test Report (.xlsx)"):
+    try:
+        out_bio = generate_certificate_from_template_bytes(
+            TEMPLATE_PATH,
+            metadata_safe,
+            perf_for_export,
+            decimals=decimals_for_export
+        )
+        fname = f"{metadata_safe.get('comp_no', 'NA')}_TestReport_{metadata_safe.get('type', 'Model')}.xlsx"
+        st.download_button(
+            "Download Test Report (.xlsx)",
+            data=out_bio,
+            file_name=fname,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.success("✅ Test Report created successfully (ready to download).")
+    except FileNotFoundError:
+        st.error(f"Template not found at {TEMPLATE_PATH}. Please ensure Certificate_Template.xlsx exists.")
+    except Exception as e:
+        st.error(f"Failed to generate report: {e}")
+
